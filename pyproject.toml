@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "iron-star"
+version = "0.1.0"
+description = ""
+authors = ["p.ulanov <p.ulanov@1440.space>"]
+readme = "README.md"
+packages = [{include = "iron_star"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+requests = "^2.32.3"
+bs4 = "^0.0.2"
+python-telegram-bot = "^22.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
