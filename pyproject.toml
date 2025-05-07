@@ -10,9 +10,12 @@ packages = [{include = "iron_star"}]
 python = "^3.10"
 requests = "^2.32.3"
 bs4 = "^0.0.2"
-python-telegram-bot = "^22.0"
+telebot = "^0.0.5"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+bot = "iron_star.telegram_bot:main"

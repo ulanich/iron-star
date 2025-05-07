@@ -1,86 +1,162 @@
-import requests
-from bs4 import BeautifulSoup
-from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-import asyncio
-import ssl
-import certifi
-import os
-from functools import partial
+import telebot
+import time
+from threading import Thread
+from dataclasses import dataclass, field
+from iron_star.polling import is_registration_open
+import json
+from pathlib import Path
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
-# Configuration
-TELEGRAM_BOT_TOKEN = "8194226321:AAGyWFDAc0qobuOXt01CFM5lF0kxsLkIci4"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
-TARGET_URL = "https://example.com"
-VALUE_SELECTOR = "span#price"
+TOKEN = '8194226321:AAGyWFDAc0qobuOXt01CFM5lF0kxsLkIci4'
+URL = 'https://iron-star.com/event/ironstar-1-8-sirius-sochi-2025/'
 
-# Global state
-last_value = None
 
-def fetch_current_value():
-    """Fetch value from website with SSL verification disabled"""
-    try:
-        response = requests.get(TARGET_URL, verify=False, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        element = soup.select_one(VALUE_SELECTOR)
-        return element.get_text().strip() if element else None
-    except Exception as e:
-        print(f"Fetch error: {e}")
-        return None
+@dataclass
+class State:
+    context_file: Path = Path(__file__).parent / 'context.json'
+    subscribed_chats: set = field(default_factory=set)
+    is_ready: bool = False
 
-async def send_alert(message):
-    """Send message with proper SSL context"""
-    ssl_context = ssl.create_default_context(cafile=certifi.where())
-    bot = Bot(TELEGRAM_BOT_TOKEN)
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+    def save_context(self):
+        with open(self.context_file, 'w') as f:
+            try:
+                data = {
+                    'subscribed_chats': list(self.subscribed_chats),
+                    'is_ready': self.is_ready,
+                }
+                json.dump(data, f)
+            except Exception as ex:
+                print('Ошибка при сериализации контекста')
+                raise ex
 
-async def monitor(check_interval=60):
-    """Monitor value changes"""
-    global last_value
-    while True:
-        current = fetch_current_value()
-        if current and current != last_value:
-            if last_value is not None:
-                await send_alert(f"🔔 Value Changed!\nOld: {last_value}\nNew: {current}")
-            last_value = current
-        await asyncio.sleep(check_interval)
+    def load_context(self):
+        if not self.context_file.is_file():
+            print('Файл контекста не обнаружен')
+            return
+        with open(self.context_file, 'r', encoding='utf-8') as f:
+            try:
+                context = json.load(f)
+                self.subscribed_chats = set(context['subscribed_chats'])
+                self.is_ready = context['is_ready']
+            except Exception as ex:
+                print('Кривой файл контекста')
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
-    await update.message.reply_text("🤖 Monitoring Bot Active!\nUse /value to check current status")
 
-async def get_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /value command"""
-    current = fetch_current_value()
-    reply = f"Current value: {current}" if current else "⚠️ Could not fetch value"
-    await update.message.reply_text(reply)
+@dataclass
+class TelegramBot:
+    bot: telebot.TeleBot = telebot.TeleBot(TOKEN)
+    state: State = State()
 
-def create_ssl_context():
-    """Create SSL context with certifi certificates"""
-    context = ssl.create_default_context()
-    context.load_verify_locations(cafile=certifi.where())
-    return context
+    _errors: str = field(init=False, default_factory=str)
 
-async def post_init(application):
-    """Start monitoring after initialization"""
-    asyncio.create_task(monitor())
+    def __post_init__(self):
+        self.menu_keyboard = self.create_menu_keyboard()
+        self.register_handlers()
+        self.state.load_context()
+        self.working = True
+        self._th = Thread(target=self.check_registration_state)
+        self._th.daemon = True
+        self._th.start()
+        print('Bot is running...')
+        self.bot.infinity_polling()
+
+    def create_menu_keyboard(self):
+        """Create a custom reply keyboard with menu commands"""
+        menu = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+        menu.add(
+            KeyboardButton('/start'),
+            KeyboardButton('/check'),
+        )
+        return menu
+
+    def register_handlers(self):
+        @self.bot.message_handler(commands=['start'])
+        def welcome_handler(message):
+            self.send_welcome(message)
+
+        @self.bot.message_handler(commands=['check'])
+        def check_value_handler(message):
+            self.check_value(message)
+
+        @self.bot.message_handler(commands=['errors'])
+        def error_handler(message):
+            self.send_errors(message)
+
+        @self.bot.message_handler(commands=['gofman'])
+        def error_handler(message):
+            self.kill_bot(message)
+
+    def send_welcome(self, message):
+        self.state.subscribed_chats.add(message.chat.id)
+        msg = (
+            'Я вас приветствую! Надеюсь ты в драйве! \n'
+            'Я пришлю тебе сообщение, как только '
+            'откроется регистрация на iron star 1/8 в октябре. '
+            'Это будет полный оверсайз!'
+        )
+        if self.state.is_ready:
+            msg = f'Беги покупать слот! \n {URL}'
+        self.bot.send_message(message.chat.id, msg, reply_markup=self.menu_keyboard)
+
+    def check_value(self, message):
+        self.state.subscribed_chats.add(message.chat.id)
+        self.bot.send_message(
+            message.chat.id,
+            f'Беги покупать слот! \n {URL}'
+            if self.state.is_ready
+            else 'Регистрация все еще закрыта',
+            reply_markup=self.menu_keyboard,
+        )
+
+    def send_errors(self, message):
+        self.state.subscribed_chats.add(message.chat.id)
+        self.bot.reply_to(
+            message,
+            self._errors if self._errors else 'Ошибок пока нет',
+        )
+
+    def kill_bot(self, message):
+        self.working = False
+        self.bot.reply_to(
+            message,
+            'БОТ ОСТАНОВЛЕН, ВСЕГО ДОБРОГО',
+        )
+        self.bot.stop_bot()
+
+    def send_message(self):
+        for chat_id in self.state.subscribed_chats:
+            try:
+                self.bot.send_message(
+                    chat_id,
+                    f'ЁКАРНЫЙ БАБАЙ! Беги покупать слот \n '
+                    f'{URL}',
+                )
+            except Exception as e:
+                error_msg = f'Failed to send message to {chat_id}: {e}'
+                self._errors += error_msg + '\n'
+                print(error_msg)
+
+    def check_registration_state(self):
+        while self.working:
+            is_ready = False
+            try:
+                is_ready = is_registration_open(
+                    URL, 'Регистрация скоро откроется',
+                )
+            except Exception as e:
+                error_msg = f'Server connection error {e}'
+                self._errors += error_msg + '\n'
+                print(error_msg)
+            if not self.state.is_ready and is_ready:
+                self.send_message()
+                self.state.is_ready = is_ready
+            self.state.save_context()
+            time.sleep(60)
+
 
 def main():
-    """Configure and start the bot"""
-    # Set environment variables for SSL
-    os.environ['SSL_CERT_FILE'] = certifi.where()
-    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+    TelegramBot()
 
-    # Create application with default settings
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("value", get_value))
-
-    print("🚀 Bot started and monitoring...")
-    application.run_polling()
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
