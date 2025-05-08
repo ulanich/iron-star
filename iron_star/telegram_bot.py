@@ -1,3 +1,4 @@
+import requests
 import telebot
 import time
 from threading import Thread
@@ -86,6 +87,10 @@ class TelegramBot:
         def error_handler(message):
             self.kill_bot(message)
 
+        @self.bot.message_handler(commands=['ids'])
+        def error_handler(message):
+            self.get_chat_ids(message)
+
     def send_welcome(self, message):
         self.state.subscribed_chats.add(message.chat.id)
         msg = (
@@ -113,6 +118,12 @@ class TelegramBot:
         self.bot.reply_to(
             message,
             self._errors if self._errors else 'Ошибок пока нет',
+        )
+
+    def get_chat_ids(self, message):
+        self.bot.reply_to(
+            message,
+            f'{self.state.subscribed_chats}',
         )
 
     def kill_bot(self, message):
@@ -143,6 +154,10 @@ class TelegramBot:
                 is_ready = is_registration_open(
                     URL, 'Регистрация скоро откроется',
                 )
+            except requests.RequestException as e:
+                error_msg = f'Server connection error {e}'
+                self._errors += error_msg + '\n'
+                print(error_msg)
             except Exception as e:
                 error_msg = f'Server connection error {e}'
                 self._errors += error_msg + '\n'

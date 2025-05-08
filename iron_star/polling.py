@@ -3,23 +3,17 @@ from bs4 import BeautifulSoup
 
 
 def is_registration_open(url, search_string='Регистрация скоро откроется'):
-    try:
-        # Fetch the webpage
-        response = requests.get(url, verify=False)
-        response.raise_for_status()  # Raise exception for HTTP errors
+    # Fetch the webpage
+    response = requests.get(url, verify=False)
+    response.raise_for_status()  # Raise exception for HTTP errors
 
-        # Parse the HTML content
-        soup = BeautifulSoup(response.text, 'html.parser')
+    # Parse the HTML content
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-        res = soup.find_all(
-            string=lambda text: search_string.lower() in str(text).lower()
-        )
-        return not len(res) > 0
-
-    except requests.RequestException as e:
-        return {'error': f"Failed to fetch the webpage: {str(e)}"}
-    except Exception as e:
-        return {'error': f"An error occurred: {str(e)}"}
+    res = soup.find_all(
+        string=lambda text: search_string.lower() in str(text).lower()
+    )
+    return not len(res) > 0
 
 
 # Example usage
