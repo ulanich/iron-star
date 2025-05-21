@@ -139,7 +139,7 @@ class TelegramBot:
             try:
                 self.bot.send_message(
                     chat_id,
-                    f'ЁКАРНЫЙ БАБАЙ! Беги покупать слот \n '
+                    f'ЁКАРНЫЙ БАБАЙ! ЖМИ! ... на ссылку и покупай слот \n '
                     f'{URL}',
                 )
             except Exception as e:
