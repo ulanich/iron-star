@@ -152,7 +152,7 @@ class TelegramBot:
             is_ready = False
             try:
                 is_ready = is_registration_open(
-                    URL, 'Регистрация скоро откроется',
+                    URL, 'Продано',
                 )
             except requests.RequestException as e:
                 error_msg = f'Server connection error {e}'
